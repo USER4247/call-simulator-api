@@ -1,0 +1,71 @@
+x-app-env: &app-env
+  REDIS_URL: redis://redis:6379/0
+  CELERY_BROKER_URL: redis://redis:6379/1
+  DATABASE_URL: postgresql://calls:calls@db:5432/calls
+  PUBLIC_BASE_URL: http://localhost:8000
+  LOCAL_BUCKET_DIR: /data/bucket
+  PERSIST_INTERVAL_SECONDS: "5"
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: calls
+      POSTGRES_PASSWORD: calls
+      POSTGRES_DB: calls
+    # not exposing 5432 on the host, clashes if you already have postgres running locally.
+    # use `docker compose exec db psql -U calls` to poke at it
+    # ports:
+    #   - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U calls -d calls"]
+      interval: 2s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      retries: 30
+
+  # one shot, runs the sql migrations then exits
+  migrate:
+    build: .
+    command: python -m app.migrate
+    environment: *app-env
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    build: .
+    environment: *app-env
+    ports:
+      - "8000:8000"
+    volumes:
+      - bucket:/data/bucket
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: .
+    # -B = run beat inside the worker. fine for one worker, for more you'd split beat out
+    command: celery -A app.celery_app worker -B --loglevel=info --concurrency=4
+    environment: *app-env
+    volumes:
+      - bucket:/data/bucket
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  bucket:
