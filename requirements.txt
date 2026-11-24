@@ -1,0 +1,7 @@
+fastapi>=0.115,<1
+uvicorn[standard]>=0.32,<1
+redis>=6.1,<7
+psycopg[binary,pool]>=3.2,<3.3
+celery[redis]>=5.4,<6
+# kombu's redis transport imports this but doesnt declare it, worker crashes on start without it
+packaging
